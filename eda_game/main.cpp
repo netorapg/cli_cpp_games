@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <memory>
 #include <thread>
+#include <chrono>
 
 const int WIDTH = 20;
 const int HEIGHT = 10;
@@ -26,6 +27,11 @@ struct InputEvent : public Event {
 struct MoveEvent : public Event {
     int dx, dy;
     MoveEvent(int dx_, int dy_) : dx(dx_), dy(dy_) {}
+};
+
+struct AttackEvent : public Event {
+    int x, y;
+    AttackEvent(int x_, int y_) : x(x_), y(y_) {}
 };
 
 // === EventBus ===
@@ -56,6 +62,11 @@ struct Player {
     int y = 5;
     char symbol = '@';
 };
+
+// Variáveis globais para a espada
+bool sword_visible = false;
+int sword_x = 0, sword_y = 0;
+std::chrono::steady_clock::time_point sword_last_shown;
 
 // === Funções auxiliares para Linux ===
 int kbhit() {
@@ -131,6 +142,39 @@ void MovementSystem(Player& player, EventBus& bus) {
         if (player.y < 0) player.y = 0;
         if (player.x >= WIDTH) player.x = WIDTH - 1;
         if (player.y >= HEIGHT) player.y = HEIGHT - 1;
+
+        sword_visible = false; // Esconde a espada ao mover
+    });
+}
+
+void InputToAttackSystem(EventBus& bus) {
+    bus.subscribe<InputEvent>([&bus](const InputEvent& evt) {
+        int dx = 0, dy = 0;
+        switch (evt.key) {
+            case 'i': dy = -1; break;
+            case 'k': dy = 1; break;
+            case 'j': dx = -1; break;
+            case 'l': dx = 1; break;
+        }
+        if (dx != 0 || dy != 0) {
+            bus.emit(AttackEvent(dx, dy));
+        }
+    });
+}
+
+void AttackSystem(Player& player, EventBus& bus) {
+    bus.subscribe<AttackEvent>([&player](const AttackEvent& evt) {
+        sword_x = player.x + evt.x;
+        sword_y = player.y + evt.y;
+        
+        // Verifica os limites
+        if (sword_x < 0) sword_x = 0;
+        if (sword_y < 0) sword_y = 0;
+        if (sword_x >= WIDTH) sword_x = WIDTH - 1;
+        if (sword_y >= HEIGHT) sword_y = HEIGHT - 1;
+        
+        sword_visible = true;
+        sword_last_shown = std::chrono::steady_clock::now(); // Atualiza o tempo da última exibição
     });
 }
 
@@ -142,6 +186,16 @@ void render(const Player& player) {
             screen[y][x] = '.';
 
     screen[player.y][player.x] = player.symbol;
+
+    if (sword_visible) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - sword_last_shown).count();
+        if (elapsed < 500) { // 0.5 segundos
+            screen[sword_y][sword_x] = 'S';
+        } else {
+            sword_visible = false;
+        }
+    }
 
     system("clear"); // Linux
     for (int y = 0; y < HEIGHT; ++y) {
@@ -156,15 +210,17 @@ int main() {
     EventBus bus;
     Player player;
 
+    // Registra todos os sistemas
     InputToMovementSystem(bus);
     MovementSystem(player, bus);
+    InputToAttackSystem(bus);
+    AttackSystem(player, bus);
 
     while (true) {
         InputSystem(bus);
         render(player);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 FPS
     }
 
     return 0;
 }
-
