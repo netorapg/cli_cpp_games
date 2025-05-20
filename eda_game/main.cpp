@@ -63,6 +63,17 @@ struct Player {
     char symbol = '@';
 };
 
+struct Sword {
+    bool visible = false;
+    int x = 0;
+    int y = 0;
+    std::vector<std::string> pattern;
+    bool horizontal = true;
+    std::chrono::steady_clock::time_point last_shown;
+};
+
+Sword sword;
+
 // Variáveis globais para a espada
 bool sword_visible = false;
 int sword_x = 0, sword_y = 0;
@@ -164,40 +175,73 @@ void InputToAttackSystem(EventBus& bus) {
 
 void AttackSystem(Player& player, EventBus& bus) {
     bus.subscribe<AttackEvent>([&player](const AttackEvent& evt) {
-        sword_x = player.x + evt.x;
-        sword_y = player.y + evt.y;
+        sword.x = player.x;
+        sword.y = player.y;
         
-        // Verifica os limites
-        if (sword_x < 0) sword_x = 0;
-        if (sword_y < 0) sword_y = 0;
-        if (sword_x >= WIDTH) sword_x = WIDTH - 1;
-        if (sword_y >= HEIGHT) sword_y = HEIGHT - 1;
+        // Define o padrão baseado na direção do ataque
+        if (evt.x != 0) { // Ataque horizontal
+            sword.horizontal = true;
+            if (evt.x > 0) { // Direita (L)
+                sword.pattern = {"-->"};
+                sword.x += 1;
+            } else { // Esquerda (J)
+                sword.pattern = {"<--"};
+                sword.x -= 3;
+            }
+        } else { // Ataque vertical
+            sword.horizontal = false;
+            if (evt.y > 0) { // Baixo (K)
+                sword.pattern = {"|", "v"};
+                sword.y += 1;
+            } else { // Cima (I)
+                sword.pattern = {"^", "|"};
+                sword.y -= 2;
+            }
+        }
         
-        sword_visible = true;
-        sword_last_shown = std::chrono::steady_clock::now(); // Atualiza o tempo da última exibição
+        sword.visible = true;
+        sword.last_shown = std::chrono::steady_clock::now();
     });
 }
+
 
 // === Render ===
 void render(const Player& player) {
     char screen[HEIGHT][WIDTH];
+    // Limpa a tela
     for (int y = 0; y < HEIGHT; ++y)
         for (int x = 0; x < WIDTH; ++x)
             screen[y][x] = '.';
 
+    // Desenha o jogador
     screen[player.y][player.x] = player.symbol;
 
-    if (sword_visible) {
+    // Desenha a espada se visível
+    if (sword.visible) {
         auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - sword_last_shown).count();
-        if (elapsed < 500) { // 0.5 segundos
-            screen[sword_y][sword_x] = 'S';
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - sword.last_shown).count();
+        
+        if (elapsed < 500) { // Visível por 500ms
+            for (size_t i = 0; i < sword.pattern.size(); ++i) {
+                int draw_y = sword.y + (sword.horizontal ? 0 : i);
+                int draw_x = sword.x + (sword.horizontal ? i : 0);
+                
+                // Verifica limites
+                if (draw_x >= 0 && draw_x < WIDTH && draw_y >= 0 && draw_y < HEIGHT) {
+                    // Desenha cada caractere do padrão
+                    for (size_t j = 0; j < sword.pattern[i].size() && (draw_x + j) < WIDTH; ++j) {
+                        if (sword.pattern[i][j] != ' ') { // Não desenha espaços
+                            screen[draw_y][draw_x + j] = sword.pattern[i][j];
+                        }
+                    }
+                }
+            }
         } else {
-            sword_visible = false;
+            sword.visible = false;
         }
     }
 
-    system("clear"); // Linux
+    system("clear");
     for (int y = 0; y < HEIGHT; ++y) {
         for (int x = 0; x < WIDTH; ++x)
             std::cout << screen[y][x];
