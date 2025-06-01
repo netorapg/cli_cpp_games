@@ -34,6 +34,11 @@ struct AttackEvent : public Event {
     AttackEvent(int x_, int y_) : x(x_), y(y_) {}
 };
 
+struct DamageEvent : public Event {
+    int x, y;
+    DamageEvent(int x_, int y_) : x(x_), y(y_) {}
+};
+
 // === EventBus ===
 class EventBus {
     std::unordered_map<std::type_index, std::vector<std::function<void(const Event&)>>> listeners;
@@ -79,13 +84,11 @@ struct Enemy {
     int x = 10;
     int y = 5;
     char symbol = 'E';
+    int moveCooldown = 0; // Cooldown para o movimento da IA
+    const int moveDelay = 2;
 };
 
 
-// Variáveis globais para a espada
-bool sword_visible = false;
-int sword_x = 0, sword_y = 0;
-std::chrono::steady_clock::time_point sword_last_shown;
 
 // === Funções auxiliares para Linux ===
 int kbhit() {
@@ -137,8 +140,8 @@ void InputSystem(EventBus& bus) {
     }
 }
 
-void InputToMovementSystem(EventBus& bus) {
-    bus.subscribe<InputEvent>([&bus](const InputEvent& evt) {
+void InputToMovementSystem(EventBus* bus) {
+    bus->subscribe<InputEvent>([bus](const InputEvent& evt) {
         int dx = 0, dy = 0;
         switch (evt.key) {
             case 'w': dy = -1; break;
@@ -147,7 +150,7 @@ void InputToMovementSystem(EventBus& bus) {
             case 'd': dx = 1; break;
         }
         if (dx != 0 || dy != 0) {
-            bus.emit(MoveEvent(dx, dy));
+            bus->emit(MoveEvent(dx, dy));
         }
     });
 }
@@ -162,12 +165,12 @@ void MovementSystem(Player& player, EventBus& bus) {
         if (player.x >= WIDTH) player.x = WIDTH - 1;
         if (player.y >= HEIGHT) player.y = HEIGHT - 1;
 
-        sword_visible = false; // Esconde a espada ao mover
+        sword.visible = false; // Esconde a espada ao mover
     });
 }
 
-void InputToAttackSystem(EventBus& bus) {
-    bus.subscribe<InputEvent>([&bus](const InputEvent& evt) {
+void InputToAttackSystem(EventBus* bus) {
+    bus->subscribe<InputEvent>([bus](const InputEvent& evt) {
         int dx = 0, dy = 0;
         switch (evt.key) {
             case 'i': dy = -1; break;
@@ -176,13 +179,13 @@ void InputToAttackSystem(EventBus& bus) {
             case 'l': dx = 1; break;
         }
         if (dx != 0 || dy != 0) {
-            bus.emit(AttackEvent(dx, dy));
+            bus->emit(AttackEvent(dx, dy));
         }
     });
 }
 
-void AttackSystem(Player& player, EventBus& bus) {
-    bus.subscribe<AttackEvent>([&player](const AttackEvent& evt) {
+void AttackSystem(Player& player, EventBus* bus) {
+    bus->subscribe<AttackEvent>([&player, bus](const AttackEvent& evt) {
         sword.x = player.x;
         sword.y = player.y;
         
@@ -208,13 +211,46 @@ void AttackSystem(Player& player, EventBus& bus) {
         }
         
         sword.visible = true;
+        // Calcula todas as posi��es que a espada ocupa e emite DamageEvent
+        for (size_t i = 0; i < sword.pattern.size(); ++i) {
+            int draw_y = sword.y + (sword.horizontal ? 0 : i);
+            int draw_x = sword.x + (sword.horizontal ? i : 0);
+
+            for (size_t j = 0; j < sword.pattern[i].size(); ++j) {
+                int posX = draw_x + (sword.horizontal ? j : 0);
+                int posY = draw_y;
+
+                if (posX >= 0 && posX < WIDTH && posY >= 0 && posY < HEIGHT) {
+                    if (sword.pattern[i][j] != ' ') {
+                        bus->emit(DamageEvent(posX, posY));
+            }
+        }
+    }
+}
+
         sword.last_shown = std::chrono::steady_clock::now();
     });
 }
 
+void EnemyDamageSystem(Enemy& enemy, EventBus& bus) {
+    bus.subscribe<DamageEvent>([&enemy](const DamageEvent& evt){
+        if (evt.x == enemy.x && evt.y == enemy.y) {
+        std::cout << "Inimigou levou dano!\n";
+        enemy.x = -100;
+        enemy.y = -100; 
+    }
+});
+}
+
+
 // === IA Enemy  ===
 void EnemyAISystem(Player& player, Enemy& enemy, EventBus& bus) {
-    bus.subscribe<MoveEvent>([&](const MoveEvent& bus) {
+    bus.subscribe<MoveEvent>([&player, &enemy](const MoveEvent& evt) {
+        if (enemy.moveCooldown > 0) {
+            enemy.moveCooldown--;
+            return;
+        }
+
         int dx = 0, dy = 0;
 
         if (enemy.x < player.x) dx = 1;
@@ -230,6 +266,7 @@ void EnemyAISystem(Player& player, Enemy& enemy, EventBus& bus) {
         if (enemy.y < 0) enemy.y = 0;
         if (enemy.x >= WIDTH) enemy.x = WIDTH - 1;
 
+        enemy.moveCooldown = enemy.moveDelay;
 
     });
 }
@@ -244,7 +281,9 @@ void render(const Player& player, const Enemy& enemy) {
             screen[y][x] = '.';
 
     // Desenha o inimigo
-    screen[enemy.y][enemy.x] = enemy.symbol;
+    if (enemy.x >= 0 && enemy.x < WIDTH && enemy.y >= 0 && enemy.y < HEIGHT) {
+        screen[enemy.y][enemy.x] = enemy.symbol;
+    }
     // Desenha o jogador
     screen[player.y][player.x] = player.symbol;
 
@@ -288,11 +327,12 @@ int main() {
     Enemy enemy;
 
     // Registra todos os sistemas
-    InputToMovementSystem(bus);
+    InputToMovementSystem(&bus);
     MovementSystem(player, bus);
-    InputToAttackSystem(bus);
-    AttackSystem(player, bus);
+    InputToAttackSystem(&bus);
+    AttackSystem(player, &bus);
     EnemyAISystem(player, enemy, bus);
+    EnemyDamageSystem(enemy, bus);
 
     while (true) {
         InputSystem(bus);
