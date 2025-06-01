@@ -74,6 +74,14 @@ struct Sword {
 
 Sword sword;
 
+// === Enemy ===
+struct Enemy {
+    int x = 10;
+    int y = 5;
+    char symbol = 'E';
+};
+
+
 // Variáveis globais para a espada
 bool sword_visible = false;
 int sword_x = 0, sword_y = 0;
@@ -204,15 +212,39 @@ void AttackSystem(Player& player, EventBus& bus) {
     });
 }
 
+// === IA Enemy  ===
+void EnemyAISystem(Player& player, Enemy& enemy, EventBus& bus) {
+    bus.subscribe<MoveEvent>([&](const MoveEvent& bus) {
+        int dx = 0, dy = 0;
+
+        if (enemy.x < player.x) dx = 1;
+        else if (enemy.x > player.x) dx = -1;
+
+        if (enemy.y < player.y) dy = 1;
+        else if (enemy.y > player.y) dy = -1;
+
+        enemy.x += dx;
+        enemy.y += dy;
+
+        if (enemy.x < 0) enemy.x = 0;
+        if (enemy.y < 0) enemy.y = 0;
+        if (enemy.x >= WIDTH) enemy.x = WIDTH - 1;
+
+
+    });
+}
+
 
 // === Render ===
-void render(const Player& player) {
+void render(const Player& player, const Enemy& enemy) {
     char screen[HEIGHT][WIDTH];
     // Limpa a tela
     for (int y = 0; y < HEIGHT; ++y)
         for (int x = 0; x < WIDTH; ++x)
             screen[y][x] = '.';
 
+    // Desenha o inimigo
+    screen[enemy.y][enemy.x] = enemy.symbol;
     // Desenha o jogador
     screen[player.y][player.x] = player.symbol;
 
@@ -253,17 +285,19 @@ void render(const Player& player) {
 int main() {
     EventBus bus;
     Player player;
+    Enemy enemy;
 
     // Registra todos os sistemas
     InputToMovementSystem(bus);
     MovementSystem(player, bus);
     InputToAttackSystem(bus);
     AttackSystem(player, bus);
+    EnemyAISystem(player, enemy, bus);
 
     while (true) {
         InputSystem(bus);
-        render(player);
-        std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 FPS
+        render(player, enemy);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // ~60 FPS
     }
 
     return 0;
