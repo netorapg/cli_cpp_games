@@ -11,8 +11,8 @@
 #include <thread>
 #include <chrono>
 
-const int WIDTH = 20;
-const int HEIGHT = 10;
+const int WIDTH = 60;
+const int HEIGHT = 30;
 
 // === Eventos ===
 struct Event {
@@ -68,7 +68,7 @@ struct Spawner {
     int spawnCooldown = 0;
     const int spawnDelay = 5;
     int moveCooldown = 0;
-    const int moveDelay = 30;
+    const int moveDelay = 5;
 };
 
 // === Player ===
