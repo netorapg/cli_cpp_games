@@ -61,6 +61,16 @@ public:
     }
 };
 
+// === Spawner ===
+struct Spawner {
+    int x = 0;
+    int y = 0;
+    int spawnCooldown = 0;
+    const int spawnDelay = 5;
+    int moveCooldown = 0;
+    const int moveDelay = 30;
+};
+
 // === Player ===
 struct Player {
     int x = 5;
@@ -232,58 +242,96 @@ void AttackSystem(Player& player, EventBus* bus) {
     });
 }
 
-void EnemyDamageSystem(Enemy& enemy, EventBus& bus) {
-    bus.subscribe<DamageEvent>([&enemy](const DamageEvent& evt){
-        if (evt.x == enemy.x && evt.y == enemy.y) {
-        std::cout << "Inimigou levou dano!\n";
-        enemy.x = -100;
-        enemy.y = -100; 
-    }
-});
-}
-
-
-// === IA Enemy  ===
-void EnemyAISystem(Player& player, Enemy& enemy, EventBus& bus) {
-    bus.subscribe<MoveEvent>([&player, &enemy](const MoveEvent& evt) {
-        if (enemy.moveCooldown > 0) {
-            enemy.moveCooldown--;
-            return;
+void EnemyDamageSystem(std::vector<Enemy>& enemies, EventBus& bus) {
+    bus.subscribe<DamageEvent>([&enemies](const DamageEvent& evt){
+        for (auto& enemy : enemies) {
+            if (evt.x == enemy.x && evt.y == enemy.y) {
+                std::cout << "Inimigo levou dano!\n";
+                enemy.x = -100;
+                enemy.y = -100;
+            }
         }
-
-        int dx = 0, dy = 0;
-
-        if (enemy.x < player.x) dx = 1;
-        else if (enemy.x > player.x) dx = -1;
-
-        if (enemy.y < player.y) dy = 1;
-        else if (enemy.y > player.y) dy = -1;
-
-        enemy.x += dx;
-        enemy.y += dy;
-
-        if (enemy.x < 0) enemy.x = 0;
-        if (enemy.y < 0) enemy.y = 0;
-        if (enemy.x >= WIDTH) enemy.x = WIDTH - 1;
-
-        enemy.moveCooldown = enemy.moveDelay;
-
     });
 }
 
 
+// === IA Enemy  ===
+void EnemyAISystem(Player& player, std::vector<Enemy>& enemies, EventBus& bus) {
+    bus.subscribe<MoveEvent>([&player, &enemies](const MoveEvent& evt) {
+        for (auto& enemy : enemies) {
+            if (enemy.moveCooldown > 0) {
+                enemy.moveCooldown--;
+                continue;
+            }
+
+            int dx = 0, dy = 0;
+
+            if (enemy.x < player.x) dx = 1;
+            else if (enemy.x > player.x) dx = -1;
+
+            if (enemy.y < player.y) dy = 1;
+            else if (enemy.y > player.y) dy = -1;
+
+            enemy.x += dx;
+            enemy.y += dy;
+
+            if (enemy.x < 0) enemy.x = 0;
+            if (enemy.y < 0) enemy.y = 0;
+            if (enemy.x >= WIDTH) enemy.x = WIDTH - 1;
+            if (enemy.y >= HEIGHT) enemy.y = HEIGHT - 1;
+
+            enemy.moveCooldown = enemy.moveDelay;
+        }
+    });
+}
+
+
+void moveSpawnerToRandomCorner(Spawner& spawner) {
+    int corner = rand() % 4;
+    switch (corner) {
+        case 0: spawner.x = 0; spawner.y = 0; break;
+        case 1: spawner.x = WIDTH - 1; spawner.y = 0; break;
+        case 2: spawner.x = 0; spawner.y = HEIGHT - 1; break;
+        case 3: spawner.x = WIDTH - 1; spawner.y = HEIGHT - 1; break;
+    }
+}
+
+void EnemySpawnerSystem(Spawner& spawner, std::vector<Enemy>& enemies) {
+    if (spawner.moveCooldown <= 0) {
+        moveSpawnerToRandomCorner(spawner);
+        spawner.moveCooldown = spawner.moveDelay;
+    } else {
+        spawner.moveCooldown--;
+    }
+
+    if (spawner.spawnCooldown <= 0) {
+        enemies.push_back(Enemy{spawner.x, spawner.y});
+        spawner.spawnCooldown = spawner.spawnDelay;
+    } else {
+        spawner.spawnCooldown--;
+    }
+}
+
 // === Render ===
-void render(const Player& player, const Enemy& enemy) {
+void render(const Player& player, const std::vector<Enemy>& enemies, const Spawner& spawner ) {
     char screen[HEIGHT][WIDTH];
     // Limpa a tela
     for (int y = 0; y < HEIGHT; ++y)
         for (int x = 0; x < WIDTH; ++x)
             screen[y][x] = '.';
 
-    // Desenha o inimigo
-    if (enemy.x >= 0 && enemy.x < WIDTH && enemy.y >= 0 && enemy.y < HEIGHT) {
-        screen[enemy.y][enemy.x] = enemy.symbol;
+    // Desenha o spawner
+     if (spawner.x >= 0 && spawner.x < WIDTH && spawner.y >= 0 && spawner.y < HEIGHT) {
+        screen[spawner.y][spawner.x] = 'S';
     }
+
+    // Desenha o inimigo
+   for (const auto& enemy : enemies) {
+        if (enemy.x >= 0 && enemy.x < WIDTH && enemy.y >= 0 && enemy.y < HEIGHT) {
+            screen[enemy.y][enemy.x] = enemy.symbol;
+        }
+    }
+
     // Desenha o jogador
     screen[player.y][player.x] = player.symbol;
 
@@ -322,22 +370,29 @@ void render(const Player& player, const Enemy& enemy) {
 
 // === Game loop ===
 int main() {
+    srand(time(nullptr)); // Para gerar números aleatórios
+
     EventBus bus;
     Player player;
-    Enemy enemy;
+    std::vector<Enemy> enemies;
+    Spawner spawner;
 
-    // Registra todos os sistemas
+    // Move o spawner inicialmente
+    moveSpawnerToRandomCorner(spawner);
+
+    // Sistemas
     InputToMovementSystem(&bus);
     MovementSystem(player, bus);
     InputToAttackSystem(&bus);
     AttackSystem(player, &bus);
-    EnemyAISystem(player, enemy, bus);
-    EnemyDamageSystem(enemy, bus);
+    EnemyAISystem(player, enemies, bus);
+    EnemyDamageSystem(enemies, bus);
 
     while (true) {
         InputSystem(bus);
-        render(player, enemy);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // ~60 FPS
+        EnemySpawnerSystem(spawner, enemies);
+        render(player, enemies, spawner);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     return 0;
